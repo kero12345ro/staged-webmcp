@@ -23,7 +23,7 @@ Authoritative source: [Official Rules](https://webmcp.devpost.com/rules). The ru
 - [x] Anonymous clean-browser request returns HTTP 200 and the Staged app rather than an auth wall.
 - [x] Complete the native lifecycle journey twice against the public site in ARM64 Chrome 151 with WebMCP enabled. These direct native API runs verify the browser lifecycle, not model behavior.
 - [x] Verify the ordinary-browser fallback with WebMCP disabled: stage, human edit, compile, commit, and guarded undo all complete through the preview registry.
-- [ ] Repeat both ordinary-browser fallback and native registry checks after the final deployment.
+- [x] Repeat both ordinary-browser fallback and native registry checks after the final application deployment.
 - [ ] Complete the exact flow twice with a real interactive Agent in ChatGPT's in-app browser or an equivalent native site-tools client before recording.
 - [x] No authentication is required; judges need no credentials.
 
@@ -34,7 +34,7 @@ Authoritative source: [Official Rules](https://webmcp.devpost.com/rules). The ru
 - [x] Owner explicitly authorizes creation of the public repository.
 - [x] Public GitHub URL opens while signed out and the anonymous GitHub API reports `visibility: public`.
 - [x] Repository About/API detects the MIT license.
-- [ ] README hero, screenshots, local setup, limitations, and native verification render correctly.
+- [x] README hero, screenshots, local setup, limitations, and native verification are publicly readable.
 - [ ] Record the exact submitted commit SHA; optionally create an annotated release tag.
 
 ## Release candidate verification
@@ -44,7 +44,7 @@ Authoritative source: [Official Rules](https://webmcp.devpost.com/rules). The ru
 - [x] Fresh-copy lint and TypeScript checks pass.
 - [x] Fresh-copy Vinext/Vite production build passes.
 - [x] Three native WebMCP lifecycle tests and two capability-compiler tests pass on ARM64 with Chrome 151.
-- [ ] Redeploy the final verified commit and repeat the signed-out live smoke test.
+- [x] Redeploy the final verified application build and repeat the signed-out live smoke test.
 
 ## Video
 
