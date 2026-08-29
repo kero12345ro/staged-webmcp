@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  compileCapability,
+  sha256Json,
+} from "@/lib/staged-capability";
+
 type ColumnId = "backlog" | "this-week" | "done";
 type OperationType = "assign" | "move" | "archive";
 
@@ -41,9 +46,14 @@ type StagedPlan = {
   blocked: BlockedOperation[];
 };
 
-type Approval = {
+type ApprovedCapability = {
   planId: string;
+  baseVersion: number;
+  baseHash: string;
+  approvedAt: number;
   expiresAt: number;
+  digest: string;
+  operations: ReadonlyArray<Readonly<PlanOperation>>;
 };
 
 type Receipt = {
@@ -55,6 +65,7 @@ type Receipt = {
   beforeHash: string;
   afterHash: string;
   beforeTasks: Task[];
+  approvalDigest: string;
   operations: PlanOperation[];
   status: "committed" | "reverted";
 };
@@ -198,7 +209,10 @@ function cloneTasks(tasks: Task[]) {
   return tasks.map((task) => ({ ...task }));
 }
 
-function applyOperations(tasks: Task[], operations: PlanOperation[]) {
+function applyOperations(
+  tasks: Task[],
+  operations: ReadonlyArray<Readonly<PlanOperation>>,
+) {
   return tasks.map((task) => {
     const relevant = operations.filter(
       (operation) => operation.enabled && operation.taskId === task.id,
@@ -216,23 +230,7 @@ function applyOperations(tasks: Task[], operations: PlanOperation[]) {
 }
 
 async function stateHash(tasks: Task[]) {
-  const canonical = JSON.stringify(tasks);
-  if (globalThis.crypto?.subtle) {
-    const digest = await globalThis.crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(canonical),
-    );
-    return Array.from(new Uint8Array(digest))
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
-  }
-
-  let hash = 2166136261;
-  for (let index = 0; index < canonical.length; index += 1) {
-    hash ^= canonical.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return sha256Json(tasks);
 }
 
 function shortId(prefix: string) {
@@ -244,20 +242,33 @@ function shortId(prefix: string) {
   );
 }
 
+function columnLabel(column: ColumnId) {
+  return COLUMNS.find((candidate) => candidate.id === column)?.label ?? column;
+}
+
 function operationLabel(operation: PlanOperation, tasks: Task[]) {
   const task = tasks.find((candidate) => candidate.id === operation.taskId);
   if (operation.type === "assign") {
     return {
       verb: "Assign",
       title: task?.title ?? operation.taskId,
-      detail: "Unassigned → " + operation.value,
+      detail: (task?.assignee ?? "Unassigned") + " → " + operation.value,
     };
   }
   if (operation.type === "move") {
+    const source = task?.column
+      ? columnLabel(task.column)
+      : "Current column";
+    const destination =
+      operation.value === "backlog" ||
+      operation.value === "this-week" ||
+      operation.value === "done"
+        ? columnLabel(operation.value)
+        : operation.value;
     return {
       verb: "Move",
       title: task?.title ?? operation.taskId,
-      detail: "Backlog → " + (operation.value === "this-week" ? "This week" : "Done"),
+      detail: source + " → " + destination,
     };
   }
   return {
@@ -385,7 +396,7 @@ export default function StagedApp() {
   const [tasks, setTasks] = useState<Task[]>(() => cloneTasks(INITIAL_TASKS));
   const [version, setVersion] = useState(12);
   const [plan, setPlan] = useState<StagedPlan | null>(null);
-  const [approval, setApproval] = useState<Approval | null>(null);
+  const [approval, setApproval] = useState<ApprovedCapability | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [webMcpStatus, setWebMcpStatus] = useState<
     "checking" | "native" | "preview" | "error"
@@ -395,6 +406,8 @@ export default function StagedApp() {
   );
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(0);
+  const [registryTools, setRegistryTools] = useState<string[]>([]);
+  const [toolchangeCount, setToolchangeCount] = useState(0);
 
   const tasksRef = useRef(tasks);
   const versionRef = useRef(version);
@@ -403,13 +416,14 @@ export default function StagedApp() {
   const receiptRef = useRef(receipt);
   const localToolsRef = useRef(new Map<string, ToolDefinition>());
   const commitPromisesRef = useRef(new Map<string, Promise<unknown>>());
+  const commitInFlightRef = useRef(false);
 
   const setPlanState = useCallback((next: StagedPlan | null) => {
     planRef.current = next;
     setPlan(next);
   }, []);
 
-  const setApprovalState = useCallback((next: Approval | null) => {
+  const setApprovalState = useCallback((next: ApprovedCapability | null) => {
     approvalRef.current = next;
     setApproval(next);
   }, []);
@@ -417,6 +431,20 @@ export default function StagedApp() {
   const setReceiptState = useCallback((next: Receipt | null) => {
     receiptRef.current = next;
     setReceipt(next);
+  }, []);
+
+  const refreshRegistry = useCallback(async () => {
+    try {
+      if (document.modelContext?.getTools) {
+        const tools = await document.modelContext.getTools();
+        setRegistryTools(tools.map((tool) => tool.name).sort());
+        return;
+      }
+    } catch {
+      // Fall through to the local preview registry.
+    }
+
+    setRegistryTools([...localToolsRef.current.keys()].sort());
   }, []);
 
   const getBoard = useCallback(async () => {
@@ -440,6 +468,15 @@ export default function StagedApp() {
 
   const stagePlan = useCallback(
     async (input: Record<string, unknown>) => {
+      if (commitInFlightRef.current) {
+        return {
+          ok: false,
+          status: "commit_in_flight",
+          message:
+            "An exact capability is already executing. Wait for its receipt before staging again.",
+        };
+      }
+
       const normalized = normalizePlanInput(
         input,
         tasksRef.current,
@@ -482,137 +519,173 @@ export default function StagedApp() {
         message: "No staged plan exists.",
       };
     }
+
+    const currentApproval =
+      approvalRef.current?.planId === current.id ? approvalRef.current : null;
+
     return {
       ok: true,
-      status: approvalRef.current ? "approved" : "awaiting_human",
+      status: currentApproval ? "approved" : "awaiting_human",
       planId: current.id,
       baseVersion: current.baseVersion,
       currentBoardVersion: versionRef.current,
       operations: current.operations.filter((operation) => operation.enabled),
       blocked: current.blocked,
-      commitCapabilityExposed: Boolean(approvalRef.current),
+      commitCapabilityExposed: Boolean(currentApproval),
+      approvedCapability: currentApproval
+        ? {
+            digest: currentApproval.digest,
+            baseHash: currentApproval.baseHash,
+            expiresAt: currentApproval.expiresAt,
+            operationCount: currentApproval.operations.length,
+          }
+        : null,
     };
   }, []);
 
-  const commitPlan = useCallback(async () => {
-    const currentPlan = planRef.current;
-    const currentApproval = approvalRef.current;
+  const commitApprovedCapability = useCallback(
+    (capability: ApprovedCapability): Promise<unknown> => {
+      const existingPromise = commitPromisesRef.current.get(capability.digest);
+      if (existingPromise) {
+        return existingPromise;
+      }
 
-    if (!currentPlan || !currentApproval || currentApproval.planId !== currentPlan.id) {
-      return {
-        ok: false,
-        status: "not_authorized",
-        message: "No exact human-approved plan is bound to this capability.",
-      };
-    }
-
-    if (Date.now() > currentApproval.expiresAt) {
-      setApprovalState(null);
-      return {
-        ok: false,
-        status: "expired",
-        planId: currentPlan.id,
-        message: "The one-time commit capability expired. Ask the human to review again.",
-      };
-    }
-
-    const existingReceipt = receiptRef.current;
-    if (
-      existingReceipt?.planId === currentPlan.id &&
-      existingReceipt.status === "committed"
-    ) {
-      return {
-        ok: true,
-        status: "already_committed",
-        planId: currentPlan.id,
-        receiptId: existingReceipt.id,
-        message: "This exact plan was already committed; no operation was repeated.",
-      };
-    }
-
-    const existingPromise = commitPromisesRef.current.get(currentPlan.id);
-    if (existingPromise) {
-      return existingPromise;
-    }
-
-    const execution = (async () => {
-      if (versionRef.current !== currentPlan.baseVersion) {
-        return {
+      const activeCapability = approvalRef.current;
+      if (!activeCapability || activeCapability.digest !== capability.digest) {
+        return Promise.resolve({
           ok: false,
-          status: "stale",
-          planId: currentPlan.id,
+          status: "not_authorized",
+          planId: capability.planId,
           message:
-            "Board version changed after staging. The plan must be restaged before commit.",
-        };
+            "This capability is no longer present in the page's live WebMCP registry.",
+        });
       }
 
-      const selectedOperations = currentPlan.operations.filter(
-        (operation) => operation.enabled,
-      );
-      if (selectedOperations.length === 0) {
-        return {
+      if (Date.now() > capability.expiresAt) {
+        setApprovalState(null);
+        return Promise.resolve({
           ok: false,
-          status: "empty",
-          planId: currentPlan.id,
-          message: "The human removed every operation, so there is nothing to commit.",
-        };
+          status: "expired",
+          planId: capability.planId,
+          approvalDigest: capability.digest,
+          message:
+            "The one-time commit capability expired. Ask the human to review again.",
+        });
       }
 
-      const beforeTasks = cloneTasks(tasksRef.current);
-      const afterTasks = applyOperations(cloneTasks(beforeTasks), selectedOperations);
-      const [beforeHash, afterHash] = await Promise.all([
-        stateHash(beforeTasks),
-        stateHash(afterTasks),
-      ]);
-      const beforeVersion = versionRef.current;
-      const afterVersion = beforeVersion + 1;
-      const nextReceipt: Receipt = {
-        id: shortId("RCP"),
-        planId: currentPlan.id,
-        committedAt: Date.now(),
-        beforeVersion,
-        afterVersion,
-        beforeHash,
-        afterHash,
-        beforeTasks,
-        operations: selectedOperations,
-        status: "committed",
-      };
+      commitInFlightRef.current = true;
+      const execution = (async () => {
+        if (versionRef.current !== capability.baseVersion) {
+          return {
+            ok: false,
+            status: "stale",
+            planId: capability.planId,
+            approvalDigest: capability.digest,
+            message:
+              "Canonical version changed after approval. This capability was consumed without committing.",
+          };
+        }
 
-      tasksRef.current = afterTasks;
-      versionRef.current = afterVersion;
-      setTasks(afterTasks);
-      setVersion(afterVersion);
-      setReceiptState(nextReceipt);
-      setPlanState(null);
-      setActivity(
-        "Agent committed the exact approved plan. Receipt " +
-          nextReceipt.id +
-          " is ready.",
-      );
+        const beforeTasks = cloneTasks(tasksRef.current);
+        const beforeHash = await stateHash(beforeTasks);
+        if (
+          beforeHash !== capability.baseHash ||
+          versionRef.current !== capability.baseVersion
+        ) {
+          return {
+            ok: false,
+            status: "stale",
+            planId: capability.planId,
+            approvalDigest: capability.digest,
+            message:
+              "Canonical state no longer matches the human-approved base hash.",
+          };
+        }
 
-      window.setTimeout(() => setApprovalState(null), 0);
+        const selectedOperations = capability.operations.map((operation) => ({
+          ...operation,
+        }));
+        const afterTasks = applyOperations(
+          cloneTasks(beforeTasks),
+          capability.operations,
+        );
+        const afterHash = await stateHash(afterTasks);
+        const liveHash = await stateHash(tasksRef.current);
 
-      return {
-        ok: true,
-        status: "committed",
-        planId: currentPlan.id,
-        receipt: {
-          id: nextReceipt.id,
+        if (
+          versionRef.current !== capability.baseVersion ||
+          liveHash !== capability.baseHash
+        ) {
+          return {
+            ok: false,
+            status: "stale",
+            planId: capability.planId,
+            approvalDigest: capability.digest,
+            message:
+              "Canonical state changed while the capability was executing.",
+          };
+        }
+
+        const beforeVersion = capability.baseVersion;
+        const afterVersion = beforeVersion + 1;
+        const nextReceipt: Receipt = {
+          id: shortId("RCP"),
+          planId: capability.planId,
+          committedAt: Date.now(),
           beforeVersion,
           afterVersion,
           beforeHash,
           afterHash,
-          operationCount: selectedOperations.length,
-        },
-        message:
-          "Committed atomically. The capability is now consumed and undo is available.",
-      };
-    })();
+          beforeTasks,
+          approvalDigest: capability.digest,
+          operations: selectedOperations,
+          status: "committed",
+        };
 
-    commitPromisesRef.current.set(currentPlan.id, execution);
-    return execution;
-  }, [setApprovalState, setPlanState, setReceiptState]);
+        tasksRef.current = afterTasks;
+        versionRef.current = afterVersion;
+        setTasks(afterTasks);
+        setVersion(afterVersion);
+        setReceiptState(nextReceipt);
+        setPlanState(null);
+        setActivity(
+          "Exact capability " +
+            capability.digest.slice(0, 12) +
+            "… committed once. Receipt " +
+            nextReceipt.id +
+            " is ready.",
+        );
+
+        return {
+          ok: true,
+          status: "committed",
+          planId: capability.planId,
+          approvalDigest: capability.digest,
+          receipt: {
+            id: nextReceipt.id,
+            beforeVersion,
+            afterVersion,
+            beforeHash,
+            afterHash,
+            approvalDigest: capability.digest,
+            operationCount: selectedOperations.length,
+          },
+          message:
+            "The frozen capability committed once, disappeared, and exposed receipt-bound undo.",
+        };
+      })().finally(() => {
+        commitInFlightRef.current = false;
+      });
+
+      commitPromisesRef.current.set(capability.digest, execution);
+      setApprovalState(null);
+      setActivity(
+        "commit_plan was invoked. Its authority is consumed before execution completes.",
+      );
+      return execution;
+    },
+    [setApprovalState, setPlanState, setReceiptState],
+  );
 
   const undoCommit = useCallback(async () => {
     const currentReceipt = receiptRef.current;
@@ -664,6 +737,19 @@ export default function StagedApp() {
   }, [setReceiptState]);
 
   useEffect(() => {
+    const context = document.modelContext;
+    if (!context?.addEventListener) return;
+
+    const handleToolchange: EventListener = () => {
+      setToolchangeCount((count) => count + 1);
+      void refreshRegistry();
+    };
+
+    context.addEventListener("toolchange", handleToolchange);
+    return () => context.removeEventListener?.("toolchange", handleToolchange);
+  }, [refreshRegistry]);
+
+  useEffect(() => {
     const controller = new AbortController();
     const localTools = localToolsRef.current;
     const definitions: ToolDefinition[] = [
@@ -678,14 +764,14 @@ export default function StagedApp() {
           properties: {},
           additionalProperties: false,
         },
-        annotations: { readOnlyHint: true, untrustedContentHint: false },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
         execute: async () => getBoard(),
       },
       {
         name: "stage_plan",
         title: "Stage a plan for human review",
         description:
-          "Propose up to eight board operations on an isolated branch. This never changes canonical data and never grants approval. The human will see and edit a deterministic diff.",
+          "Propose up to eight non-canonical board operations for human review. This never changes canonical data or grants mutation authority. The human can edit the deterministic diff before compiling a capability.",
         inputSchema: {
           $schema: "https://json-schema.org/draft/2020-12/schema",
           type: "object",
@@ -727,7 +813,7 @@ export default function StagedApp() {
           required: ["summary", "operations"],
           additionalProperties: false,
         },
-        annotations: { readOnlyHint: false, untrustedContentHint: false },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: async (input) => stagePlan(input),
       },
       {
@@ -741,7 +827,7 @@ export default function StagedApp() {
           properties: {},
           additionalProperties: false,
         },
-        annotations: { readOnlyHint: true, untrustedContentHint: false },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
         execute: async () => inspectPlan(),
       },
     ];
@@ -751,6 +837,7 @@ export default function StagedApp() {
     const register = async () => {
       if (!document.modelContext?.registerTool) {
         setWebMcpStatus("preview");
+        await refreshRegistry();
         return;
       }
 
@@ -763,6 +850,7 @@ export default function StagedApp() {
           ),
         );
         setWebMcpStatus("native");
+        await refreshRegistry();
       } catch {
         setWebMcpStatus("error");
       }
@@ -774,12 +862,13 @@ export default function StagedApp() {
       controller.abort();
       definitions.forEach((tool) => localTools.delete(tool.name));
     };
-  }, [getBoard, inspectPlan, stagePlan]);
+  }, [getBoard, inspectPlan, refreshRegistry, stagePlan]);
 
   useEffect(() => {
     const localTools = localToolsRef.current;
     if (!approval) {
       localTools.delete("commit_plan");
+      window.setTimeout(() => void refreshRegistry(), 0);
       return;
     }
 
@@ -788,7 +877,13 @@ export default function StagedApp() {
       name: "commit_plan",
       title: "Commit approved plan",
       description:
-        "Commit only the exact staged plan already reviewed and approved by the human. The plan identity is closure-bound: this tool cannot create, edit, or approve a plan. It expires and disappears after one successful use.",
+        "Execute frozen approval " +
+        approval.digest.slice(0, 16) +
+        "… exactly once against board v" +
+        approval.baseVersion +
+        ". This no-argument tool is closure-bound to " +
+        approval.operations.length +
+        " reviewed operations; it cannot create, edit, or select another plan.",
       inputSchema: {
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
@@ -796,7 +891,7 @@ export default function StagedApp() {
         additionalProperties: false,
       },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
-      execute: async () => commitPlan(),
+      execute: async () => commitApprovedCapability(approval),
     };
 
     localTools.set(commitTool.name, commitTool);
@@ -804,11 +899,14 @@ export default function StagedApp() {
     if (document.modelContext?.registerTool && webMcpStatus === "native") {
       void document.modelContext
         .registerTool(commitTool, { signal: controller.signal })
+        .then(() => refreshRegistry())
         .catch(() => setWebMcpStatus("error"));
+    } else {
+      window.setTimeout(() => void refreshRegistry(), 0);
     }
 
     const timeout = window.setTimeout(() => {
-      if (approvalRef.current?.planId === approval.planId) {
+      if (approvalRef.current?.digest === approval.digest) {
         setApprovalState(null);
         setActivity("The one-time commit capability expired without being used.");
       }
@@ -818,13 +916,21 @@ export default function StagedApp() {
       window.clearTimeout(timeout);
       window.setTimeout(() => controller.abort(), 0);
       localTools.delete(commitTool.name);
+      window.setTimeout(() => void refreshRegistry(), 0);
     };
-  }, [approval, commitPlan, setApprovalState, webMcpStatus]);
+  }, [
+    approval,
+    commitApprovedCapability,
+    refreshRegistry,
+    setApprovalState,
+    webMcpStatus,
+  ]);
 
   useEffect(() => {
     const localTools = localToolsRef.current;
     if (!receipt || receipt.status !== "committed") {
       localTools.delete("undo_commit");
+      window.setTimeout(() => void refreshRegistry(), 0);
       return;
     }
 
@@ -849,14 +955,18 @@ export default function StagedApp() {
     if (document.modelContext?.registerTool && webMcpStatus === "native") {
       void document.modelContext
         .registerTool(undoTool, { signal: controller.signal })
+        .then(() => refreshRegistry())
         .catch(() => setWebMcpStatus("error"));
+    } else {
+      window.setTimeout(() => void refreshRegistry(), 0);
     }
 
     return () => {
       window.setTimeout(() => controller.abort(), 0);
       localTools.delete(undoTool.name);
+      window.setTimeout(() => void refreshRegistry(), 0);
     };
-  }, [receipt, undoCommit, webMcpStatus]);
+  }, [receipt, refreshRegistry, undoCommit, webMcpStatus]);
 
   useEffect(() => {
     if (!approval) return;
@@ -928,7 +1038,7 @@ export default function StagedApp() {
   };
 
   const toggleOperation = (operationId: string) => {
-    if (!plan || approval) return;
+    if (!plan || approval || busy) return;
     const next = {
       ...plan,
       operations: plan.operations.map((operation) =>
@@ -941,7 +1051,7 @@ export default function StagedApp() {
   };
 
   const changeAssignee = (operationId: string, value: string) => {
-    if (!plan || approval) return;
+    if (!plan || approval || busy) return;
     const next = {
       ...plan,
       operations: plan.operations.map((operation) =>
@@ -951,17 +1061,69 @@ export default function StagedApp() {
     setPlanState(next);
   };
 
-  const approvePlan = () => {
-    if (!plan || plan.operations.every((operation) => !operation.enabled)) return;
-    const nextApproval = {
-      planId: plan.id,
-      expiresAt: Date.now() + 60_000,
-    };
-    setNow(Date.now());
-    setApprovalState(nextApproval);
-    setActivity(
-      "Human approved the exact diff. commit_plan is exposed for 60 seconds.",
-    );
+  const approvePlan = async () => {
+    const currentPlan = planRef.current;
+    const selectedOperations = currentPlan?.operations
+      .filter((operation) => operation.enabled)
+      .map((operation) => ({ ...operation }));
+
+    if (!currentPlan || !selectedOperations?.length || busy) return;
+
+    setBusy(true);
+    setActivity("Compiling the reviewed diff into an exact capability…");
+
+    try {
+      const baseTasks = cloneTasks(tasksRef.current);
+      const baseHash = await stateHash(baseTasks);
+      const compiled = await compileCapability({
+        subjectId: currentPlan.id,
+        baseVersion: currentPlan.baseVersion,
+        baseHash,
+        payload: selectedOperations,
+        ttlMs: 60_000,
+      });
+      const liveHash = await stateHash(tasksRef.current);
+      const livePlan = planRef.current;
+      const liveOperations = livePlan?.operations
+        .filter((operation) => operation.enabled)
+        .map((operation) => ({ ...operation }));
+
+      if (
+        !livePlan ||
+        livePlan.id !== currentPlan.id ||
+        livePlan.baseVersion !== currentPlan.baseVersion ||
+        versionRef.current !== currentPlan.baseVersion ||
+        liveHash !== baseHash ||
+        JSON.stringify(liveOperations) !== JSON.stringify(selectedOperations)
+      ) {
+        setActivity(
+          "The plan or canonical state changed during compilation. Review it again.",
+        );
+        return;
+      }
+
+      const nextApproval: ApprovedCapability = Object.freeze({
+        planId: compiled.subjectId,
+        baseVersion: compiled.baseVersion,
+        baseHash: compiled.baseHash,
+        approvedAt: compiled.approvedAt,
+        expiresAt: compiled.expiresAt,
+        digest: compiled.digest,
+        operations: compiled.payload,
+      });
+
+      setNow(compiled.approvedAt);
+      setApprovalState(nextApproval);
+      setActivity(
+        "Human approval compiled capability " +
+          compiled.digest.slice(0, 12) +
+          "…. commit_plan now exists for 60 seconds.",
+      );
+    } catch {
+      setActivity("Capability compilation failed. No mutation tool was exposed.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const revokeApproval = () => {
@@ -970,6 +1132,13 @@ export default function StagedApp() {
   };
 
   const resetDemo = () => {
+    if (commitInFlightRef.current) {
+      setActivity(
+        "Reset refused while an exact capability is still producing its receipt.",
+      );
+      return;
+    }
+
     const fresh = cloneTasks(INITIAL_TASKS);
     tasksRef.current = fresh;
     versionRef.current = 12;
@@ -1008,7 +1177,16 @@ export default function StagedApp() {
       .filter((operation) => operation.enabled && operation.taskId === taskId)
       .map((operation) => {
         if (operation.type === "assign") return "assign → " + operation.value;
-        if (operation.type === "move") return "move → This week";
+        if (operation.type === "move") {
+          return (
+            "move → " +
+            (operation.value === "backlog" ||
+            operation.value === "this-week" ||
+            operation.value === "done"
+              ? columnLabel(operation.value)
+              : operation.value)
+          );
+        }
         return "archive";
       }) ?? [];
 
@@ -1052,21 +1230,21 @@ export default function StagedApp() {
         <div className="grid items-end gap-8 lg:grid-cols-[1fr_420px]">
           <div>
             <div className="mb-5 flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.18em] text-[#66665e]">
-              <span>Agent branch</span>
+              <span>Capability control</span>
               <span className="h-px w-10 bg-[#171713]/25" />
-              <span>Human commit</span>
+              <span>Native WebMCP lifecycle</span>
             </div>
             <h1 className="max-w-4xl text-[clamp(3rem,7vw,7.4rem)] font-semibold leading-[0.83] tracking-[-0.075em]">
-              Let agents draft.
+              Approval should change
               <br />
-              <span className="text-[#6955e8]">You decide</span> what lands.
+              <span className="text-[#6955e8]">what agents can do.</span>
             </h1>
           </div>
           <div className="border-l border-[#171713]/15 pl-5 lg:mb-2 lg:pl-7">
             <p className="max-w-md text-base leading-7 text-[#56564f]">
-              Git-style control for consequential agent actions. Stage a plan,
-              inspect one deterministic diff, approve once, commit atomically,
-              and keep the receipt.
+              Review one multi-step plan, then compile that exact decision into
+              a 60-second, one-shot WebMCP tool. Before approval, the mutation
+              capability does not exist.
             </p>
           </div>
         </div>
@@ -1089,7 +1267,83 @@ export default function StagedApp() {
             </div>
             <div className="mt-3 flex items-center gap-2 sm:mt-0">
               <span className="rounded-full bg-[#e8f7cd] px-2.5 py-1 text-[11px] font-semibold text-[#385d00]">
-                Production untouched until commit
+                {receipt
+                  ? receipt.status === "committed"
+                    ? "Exact capability landed · receipt linked"
+                    : "Receipt compensated · canonical state restored"
+                  : "Canonical state untouched until capability call"}
+              </span>
+            </div>
+          </div>
+
+          <div
+            data-testid="live-webmcp-registry"
+            className="flex flex-col gap-3 border-b border-[#171713]/10 bg-[#eeece5] px-5 py-4 lg:flex-row lg:items-center lg:justify-between lg:px-6"
+          >
+            <div className="shrink-0">
+              <div className="flex items-center gap-2">
+                <StatusDot tone={webMcpStatus === "native" ? "green" : "amber"} />
+                <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em]">
+                  {webMcpStatus === "native"
+                    ? "Live native registry"
+                    : "Preview registry"}{" "}
+                  · {registryTools.length} tools
+                </p>
+              </div>
+              <p className="mt-1 font-mono text-[9px] text-[#77776e]">
+                toolchange events observed: {toolchangeCount}
+              </p>
+            </div>
+
+            <div className="flex min-w-0 flex-wrap gap-1.5">
+              {registryTools.length > 0 ? (
+                registryTools.map((name) => (
+                  <code
+                    key={name}
+                    className={
+                      "rounded-md border px-2 py-1.5 text-[9px] " +
+                      (name === "commit_plan"
+                        ? "border-[#6955e8]/35 bg-[#e7e1ff] text-[#4d39c0]"
+                        : name === "undo_commit"
+                          ? "border-[#3aa9bd]/35 bg-[#def6fa] text-[#146879]"
+                          : "border-[#171713]/10 bg-white/70 text-[#5c5c55]")
+                    }
+                  >
+                    {name}
+                  </code>
+                ))
+              ) : (
+                <span className="font-mono text-[9px] text-[#77776e]">
+                  registering…
+                </span>
+              )}
+            </div>
+
+            <div className="hidden shrink-0 items-center gap-1.5 font-mono text-[9px] lg:flex">
+              <span className="rounded border border-[#171713]/10 bg-white/70 px-2 py-1.5">
+                base ×3
+              </span>
+              <span className="text-[#8a8a82]">→</span>
+              <span
+                className={
+                  "rounded border px-2 py-1.5 " +
+                  (registryTools.includes("commit_plan")
+                    ? "border-[#6955e8]/35 bg-[#e7e1ff] text-[#4d39c0]"
+                    : "border-dashed border-[#171713]/15 text-[#999990]")
+                }
+              >
+                commit_plan
+              </span>
+              <span className="text-[#8a8a82]">→</span>
+              <span
+                className={
+                  "rounded border px-2 py-1.5 " +
+                  (registryTools.includes("undo_commit")
+                    ? "border-[#3aa9bd]/35 bg-[#def6fa] text-[#146879]"
+                    : "border-dashed border-[#171713]/15 text-[#999990]")
+                }
+              >
+                undo_commit
               </span>
             </div>
           </div>
@@ -1107,7 +1361,7 @@ export default function StagedApp() {
                 </div>
                 {plan && (
                   <span className="animate-pulse-soft rounded-full border border-[#6955e8]/30 bg-[#eeeafd] px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#5641d0]">
-                    Branch preview active
+                    Plan preview active
                   </span>
                 )}
               </div>
@@ -1194,14 +1448,14 @@ export default function StagedApp() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/45">
-                      Agent branch
+                      Capability compiler
                     </p>
                     <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em]">
-                      Review before reality
+                      {receipt ? "Receipt-bound recovery" : "Review, then grant"}
                     </h2>
                   </div>
                   <span className="rounded-full border border-white/15 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-white/60">
-                    {plan ? plan.id : receipt ? receipt.id : "No branch"}
+                    {plan ? plan.id : receipt ? receipt.id : "No capability"}
                   </span>
                 </div>
               </div>
@@ -1229,7 +1483,7 @@ export default function StagedApp() {
                     <div className="space-y-2.5">
                       {[
                         ["get_launch_board", "Read only"],
-                        ["stage_plan", "Branch only"],
+                        ["stage_plan", "Plan only"],
                         ["inspect_staged_plan", "Read only"],
                       ].map(([name, scope]) => (
                         <div key={name} className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.025] px-3.5 py-3">
@@ -1269,8 +1523,8 @@ export default function StagedApp() {
                         Canonical board is still v{version}
                       </div>
                       <p className="mt-1.5 text-[11px] leading-5 text-white/50">
-                        The agent created a reviewable branch. It cannot approve
-                        or commit this plan.
+                        The agent created a reviewable proposal. It cannot approve it,
+                        and commit_plan still does not exist.
                       </p>
                     </div>
 
@@ -1310,7 +1564,7 @@ export default function StagedApp() {
                             <div className="flex items-start gap-3">
                               <button
                                 type="button"
-                                disabled={Boolean(approval)}
+                                disabled={Boolean(approval) || busy}
                                 onClick={() => toggleOperation(operation.id)}
                                 aria-label={operation.enabled ? "Remove operation" : "Restore operation"}
                                 className={
@@ -1330,6 +1584,7 @@ export default function StagedApp() {
                                 <p className="mt-1 truncate text-sm font-medium">{label.title}</p>
                                 {operation.type === "assign" && !approval ? (
                                   <select
+                                    disabled={busy}
                                     value={operation.value}
                                     onChange={(event) => changeAssignee(operation.id, event.target.value)}
                                     className="mt-2 w-full rounded-lg border border-white/10 bg-[#24241e] px-2.5 py-2 text-[11px] text-white outline-none"
@@ -1352,10 +1607,12 @@ export default function StagedApp() {
                       <button
                         type="button"
                         onClick={approvePlan}
-                        disabled={selectedOperations === 0}
+                        disabled={selectedOperations === 0 || busy}
                         className="mt-5 w-full rounded-xl bg-[#b7f34a] px-4 py-3.5 text-sm font-bold text-[#171713] transition hover:bg-[#c6fb68] disabled:opacity-30"
                       >
-                        Approve exact diff · {selectedOperations} changes
+                        {busy
+                          ? "Compiling capability…"
+                          : "Compile capability · " + selectedOperations + " operations"}
                       </button>
                     ) : (
                       <div className="mt-5 rounded-2xl border border-[#b7f34a]/35 bg-[#b7f34a]/10 p-4">
@@ -1366,9 +1623,33 @@ export default function StagedApp() {
                               <code className="text-xs font-semibold text-[#d9ff91]">commit_plan</code>
                             </div>
                             <p className="mt-2 text-[11px] leading-5 text-white/55">
-                              Closure-bound to {plan.id}. No plan ID or approval
-                              token is controlled by the agent.
+                              This tool accepts <code>{"{}"}</code>. The reviewed
+                              payload is frozen inside the registration closure.
                             </p>
+                            <dl className="mt-3 space-y-1.5 border-t border-white/10 pt-3 font-mono text-[9px]">
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-white/30">approval digest</dt>
+                                <dd
+                                  className="text-[#d9ff91]"
+                                  data-testid="approval-digest"
+                                >
+                                  {approval.digest.slice(0, 16)}…
+                                </dd>
+                              </div>
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-white/30">bound base</dt>
+                                <dd className="text-white/65">
+                                  v{approval.baseVersion} ·{" "}
+                                  {approval.baseHash.slice(0, 8)}…
+                                </dd>
+                              </div>
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-white/30">frozen operations</dt>
+                                <dd className="text-white/65">
+                                  {approval.operations.length}
+                                </dd>
+                              </div>
+                            </dl>
                           </div>
                           <span className="font-mono text-xl font-semibold text-[#b7f34a]">{ttl}s</span>
                         </div>
@@ -1434,6 +1715,12 @@ export default function StagedApp() {
                           <dd className="text-white/75">{receipt.id}</dd>
                         </div>
                         <div className="flex justify-between gap-4">
+                          <dt className="text-white/30">approval</dt>
+                          <dd className="text-white/75">
+                            {receipt.approvalDigest.slice(0, 16)}…
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
                           <dt className="text-white/30">before</dt>
                           <dd className="text-white/75">{receipt.beforeHash.slice(0, 16)}…</dd>
                         </div>
@@ -1484,9 +1771,9 @@ export default function StagedApp() {
       <section className="border-y border-[#171713]/10 bg-[#e9e5da]">
         <div className="mx-auto grid max-w-[1500px] divide-y divide-[#171713]/10 px-5 md:grid-cols-3 md:divide-x md:divide-y-0 lg:px-8">
           {[
-            ["01", "Agent drafts", "The agent can explore and stage a bounded plan, but production state stays unchanged."],
-            ["02", "Human edits", "One semantic diff replaces a pile of low-context approval popups."],
-            ["03", "Capability appears", "Approval creates an exact, expiring, one-use WebMCP tool with a receipt and safe undo."],
+            ["01", "Tool is absent", "The agent can inspect and propose, but no mutation capability exists before review."],
+            ["02", "Approval compiles", "The edited operations, base version, state hash, lifetime, and digest become one frozen capability."],
+            ["03", "Authority destroys itself", "One empty-input call consumes commit_plan; a guarded compensation tool appears from its receipt."],
           ].map(([number, title, copy]) => (
             <div key={number} className="py-8 md:px-7 md:first:pl-0 md:last:pr-0">
               <span className="font-mono text-[10px] text-[#77776e]">{number}</span>
@@ -1498,7 +1785,7 @@ export default function StagedApp() {
       </section>
 
       <footer className="mx-auto flex max-w-[1500px] flex-col gap-3 px-5 py-8 text-xs text-[#77776e] sm:flex-row sm:items-center sm:justify-between lg:px-8">
-        <p>Staged · Git-style control for agent actions</p>
+        <p>Staged · Approval, compiled into capability</p>
         <p className="font-mono text-[10px] uppercase tracking-[0.12em]">
           Built for the OpenAI WebMCP Challenge
         </p>

@@ -1,37 +1,43 @@
 # Staged
 
-**Git-style control for agent actions.**
+> **Approval, compiled into capability.**
 
-Staged lets an AI agent prepare a multi-step plan on an isolated branch while canonical application state stays untouched. A human reviews and edits one deterministic diff. Approval dynamically exposes an exact, expiring, one-use WebMCP `commit_plan` capability. A successful commit produces a verifiable receipt and exposes `undo_commit` only while the receipt still matches current state.
+Staged is a WebMCP control pattern for consequential, multi-step agent work. The agent may inspect live application state and draft a plan, but it cannot mutate canonical state. A person reviews and edits one semantic diff. Only then does the page compile that exact decision into a 60-second, one-shot `commit_plan` tool.
+
+A successful commit consumes the capability, returns a before/after receipt, and conditionally exposes `undo_commit` while compensation remains conflict-safe.
+
+> **The central invariant: before approval, commit is not denied—it does not exist.**
 
 ![Staged launch-control demo](artifacts/initial.png)
 
 ## Why this exists
 
-Browser agents are getting the ability to act, but the usual controls are poorly matched to multi-step work:
+A confirmation dialog answers “allow this call?” It does not answer “is this whole plan correct?”
 
-- Per-call approval interrupts the user without showing the whole outcome.
-- Broad session approval gives the agent more authority than the current task needs.
-- A final “Are you sure?” dialog arrives too late to make the plan understandable.
-- Retrying partially completed actions can duplicate side effects.
-- Undo is often promised without checking whether newer work would be overwritten.
+For multi-step work, the usual controls are poorly matched:
 
-Staged borrows the control model that made collaborative software development safe: **branch → diff → review → commit → receipt → revert**.
+- interrupt the person once per tool call, without showing the combined outcome;
+- grant broad session authority before the agent has formed a concrete plan;
+- confirm a final call after the agent has already selected the executable payload;
+- retry partially completed actions and risk duplicate side effects; or
+- promise undo without checking whether newer work would be overwritten.
+
+Staged separates **proposal** from **authority**. Most approval systems gate an action. Staged gates the existence of the action.
 
 ## The demo
 
-The included launch-operations workspace makes the mechanism visible:
+The included launch-operations workspace makes every authority transition visible:
 
-1. The agent reads the canonical board through `get_launch_board`.
-2. It calls `stage_plan` with several proposed operations.
-3. Valid operations appear as a ghost preview; a protected billing operation is blocked by policy.
-4. The human changes an assignee or removes operations from the diff.
-5. `commit_plan` is still absent from the browser tool registry.
-6. The human approves the exact edited diff.
-7. The page dynamically registers `commit_plan` for 60 seconds using `AbortSignal`.
-8. The agent calls it once. The plan lands as one state transition and returns a receipt.
-9. `commit_plan` disappears. `undo_commit` appears only while the receipt matches.
-10. Undo verifies version and state hash before compensating the reversible changes.
+1. The live registry initially contains only `get_launch_board`, `stage_plan`, and `inspect_staged_plan`.
+2. The agent proposes several operations. Policy rejects protected `BILL-*` work before review.
+3. The person changes an assignee or removes operations while the canonical board remains at v12.
+4. Approval freezes the selected operations, base version, and base-state hash.
+5. The page computes a SHA-256 approval digest over that exact snapshot and 60-second lifetime.
+6. Only now does `document.modelContext.registerTool()` expose `commit_plan`.
+7. `commit_plan` accepts `{}`: the agent cannot replace the plan, choose another ID, or broaden the payload.
+8. Invocation consumes authority before asynchronous execution completes. Concurrent retries share one result.
+9. The commit returns a digest-linked receipt; `commit_plan` disappears and guarded `undo_commit` appears.
+10. Undo verifies the receipt's version and state hash before compensation, then removes itself.
 
 ![Receipt after an approved commit](artifacts/committed.png)
 
@@ -40,12 +46,12 @@ The included launch-operations workspace makes the mechanism visible:
 | Tool | Availability | Authority |
 | --- | --- | --- |
 | `get_launch_board` | Always | Read canonical board and policy locks |
-| `stage_plan` | Always | Write only to an isolated review branch |
-| `inspect_staged_plan` | Always | Read the current diff and approval state |
-| `commit_plan` | Only after human approval; 60-second TTL; one use | Commit only the closure-bound approved plan |
+| `stage_plan` | Always | Create only a non-canonical, policy-checked proposal |
+| `inspect_staged_plan` | Always | Read the diff, digest, bounds, and registry state |
+| `commit_plan` | Only after approval; 60-second TTL; one invocation | Execute only the frozen digest-bound snapshot |
 | `undo_commit` | Only after a successful reversible commit | Compensate only if the receipt still matches |
 
-The important part is what the agent **cannot** submit to `commit_plan`: no plan ID, approval token, nonce, operations, or replacement payload. Those values are bound inside the website when the human approves. The tool has an empty input schema.
+The important part is what the agent **cannot** submit to `commit_plan`: no plan ID, approval token, nonce, operations, or replacement payload. Approval deep-clones and freezes the edited operations, binds the canonical version and state hash, and computes a digest that the dynamic tool closure captures. The tool has an empty input schema.
 
 ## Why WebMCP is essential
 
@@ -62,40 +68,89 @@ Without WebMCP, the product would need a separate remote tool server, duplicated
 ## Safety invariants demonstrated
 
 - **Stage is not execute.** `stage_plan` never mutates canonical board data.
-- **Policy precedes approval.** Protected `BILL-*` work is rejected before the review branch is created.
-- **Approval is exact.** The capability is bound to one edited plan, not a category of future actions.
-- **Authority expires.** Approval is removed through the registration's `AbortSignal`.
-- **Commit is stale-safe.** A base-version mismatch refuses the commit and requires restaging.
-- **Retry is idempotent.** Concurrent calls share the same in-flight result; an already committed plan is not applied twice.
+- **Policy precedes approval.** Protected `BILL-*` work is rejected before review.
+- **Approval is exact.** The digest binds the edited operations, base version, base hash, and lifetime.
+- **The agent cannot substitute payload.** `commit_plan` accepts only `{}`.
+- **Authority is one-shot.** Invocation consumes the active registration before asynchronous work completes.
+- **Authority expires or revokes.** `AbortSignal` removes the tool on use, human revoke, or TTL.
+- **Commit is stale-safe.** Version or base-hash mismatch consumes the capability without writing.
+- **Retry is idempotent.** Concurrent calls share the same in-flight result and receipt.
 - **Undo is conflict-safe.** It refuses to overwrite state that no longer matches the receipt.
-- **Receipts are inspectable.** Before/after versions and SHA-256 state hashes make the transition visible.
+- **Receipts are inspectable.** Approval digest, versions, and before/after hashes form a visible chain.
+
+## What Staged is—and is not
+
+Staged does not claim to invent branches, diffs, confirmation dialogs, or rollback. It demonstrates a narrower control primitive: **compile one human-reviewed outcome into the temporary existence of an exact WebMCP capability**.
+
+| Pattern | What the person authorizes | Agent authority at commit time | Tool lifecycle |
+| --- | --- | --- | --- |
+| **Staged** | One editable, multi-operation semantic diff | `commit_plan` accepts `{}`; the site binds the reviewed payload | Absent → approved for 60s → invoked/revoked; receipt-bound undo appears next |
+| Ordinary/browser confirm | One call and its already-selected arguments | The agent already has the callable tool and supplies its payload | Tool normally remains available |
+| `requestUserInteraction()` | Site-defined consent or input during execution | The tool execution has already begun | Tool normally remains available |
+| [WebMCP + Legit exploration](https://github.com/WebMCP-org/webMCP-Legit-exploration) | A versioned agent branch and preview before merge | Branch, merge, history, and rollback are regular capabilities | Focuses on versioned state and multi-agent conflict handling |
+| [Generic WebMCP consent wrapper](https://github.com/ElBartoTn/webmcp-consent) | Auto/confirm/deny for each intercepted call | The agent supplies the original call arguments | Existing tools stay visible behind a policy wrapper |
+
+These patterns are complementary. A production adapter could use versioned storage, a baseline consent policy, and `requestUserInteraction()` for authentication. Staged's distinct contribution is representing approval as the temporary existence of a payload-free, exact capability.
 
 ## Architecture
 
 ```text
-WebMCP-aware agent
-        │
-        ├── get_launch_board / stage_plan / inspect_staged_plan
-        ▼
-Isolated staged plan ───────────────┐
-        │                           │
-        ▼                           │
-Human-editable semantic diff        │ canonical state unchanged
-        │                           │
-        └── explicit approval ──────┘
+Always-visible WebMCP surface
+(get_launch_board · stage_plan · inspect_staged_plan)
                     │
                     ▼
-      dynamic commit_plan registration
-      (closure-bound · TTL · AbortSignal)
+ Non-canonical plan + policy result
                     │
                     ▼
-         version check → state transition
+       Human edits one semantic diff
                     │
                     ▼
-       receipt → conditional undo_commit
+ freeze {operations, baseVersion, baseHash, TTL}
+                    │
+                    ▼
+          SHA-256 approval digest
+                    │
+                    ▼
+ registerTool(commit_plan, { signal })
+       empty input · closure-bound
+                    │
+       invoke → consume before await
+                    │
+                    ▼
+ version + hash CAS → receipt-linked commit
+                    │
+                    ▼
+       conditional guarded undo_commit
 ```
 
 The hackathon demo keeps its deterministic state engine in the browser so the entire mechanism is inspectable. A production adapter should place canonical data, idempotency records, and compare-and-swap commit logic in the application's authenticated server transaction while preserving the same WebMCP capability lifecycle.
+
+## Reusable primitive
+
+The demo's approval compiler is framework-independent and lives in `lib/staged-capability.ts`. It canonicalizes JSON, clones and deeply freezes the reviewed payload, binds the base version/hash and TTL, and returns a SHA-256 digest.
+
+```ts
+const approval = await compileCapability({
+  subjectId: plan.id,
+  baseVersion: board.version,
+  baseHash: await hash(board),
+  payload: humanEditedOperations,
+  ttlMs: 60_000,
+});
+
+// Only after this point:
+const lease = new AbortController();
+await document.modelContext.registerTool(
+  {
+    name: "commit_plan",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    execute: () => commitExactlyOnce(approval),
+  },
+  { signal: lease.signal },
+);
+```
+
+A domain adapter supplies its own validation, preview, transaction, receipt, and compensation logic. The same lifecycle can narrow CRM bulk edits, CMS publishing, admin operations, or finance proposals without turning the compiler into a generic orchestration platform.
 
 ## Run locally
 
@@ -138,12 +193,14 @@ npm run test:webmcp
 The Playwright suite drives Chrome's real `document.modelContext` API. It verifies:
 
 - only the three base tools exist initially;
-- native `executeTool()` can stage a plan;
-- policy-blocked work does not enter the diff;
-- `commit_plan` appears only after a human click;
-- native commit consumes that tool and exposes `undo_commit`;
+- native `executeTool()` stages a plan while policy-blocked work stays out;
+- a human edit replaces the agent's proposed value before digest compilation;
+- the inspector and UI expose the same 64-character approval digest;
+- `commit_plan` appears only after the human action and accepts `{}`;
+- two concurrent native calls return the same receipt and increment state once;
+- commit consumes itself and exposes receipt-bound `undo_commit`;
 - native undo removes its own capability;
-- revoking approval removes `commit_plan` without touching canonical state.
+- revoke and exact 60-second expiry both remove `commit_plan` without touching canonical state.
 
 ## Scope and limitations
 
