@@ -249,6 +249,26 @@ test("human approval dynamically grants and consumes an exact commit capability"
     .poll(() => nativeToolNames(page))
     .toEqual([...baseTools, "undo_commit"].sort());
 
+  const followUp = await executeNativeTool(page, "stage_plan", {
+    summary: "Prepare a follow-up without changing canonical state.",
+    operations: [
+      {
+        type: "assign",
+        taskId: "OPS-22",
+        value: "Jon Bell",
+        reason: "Prove that non-canonical staging does not discard safe undo.",
+      },
+    ],
+  });
+  expect(followUp).toMatchObject({
+    ok: true,
+    status: "staged",
+    baseVersion: 13,
+  });
+  await expect
+    .poll(() => nativeToolNames(page))
+    .toEqual([...baseTools, "undo_commit"].sort());
+
   const reverted = await executeNativeTool(page, "undo_commit", {});
 
   expect(reverted).toMatchObject({

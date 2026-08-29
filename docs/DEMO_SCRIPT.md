@@ -1,93 +1,101 @@
-# Demo script — target runtime 2:38
+# Demo script — target runtime 2:46
 
-The recording must show a real agent invoking the page's native WebMCP tools. The guided-demo button is only a fallback and should not be the main evidence.
+The final recording must show a real interactive Agent invoking the page's native WebMCP tools. Direct `document.modelContext` automation is strong lifecycle evidence, but it is not model-behavior evidence. The guided-demo button is only an ordinary-browser fallback and must not be the main recording.
 
 ## Before recording
 
 - Start from a fresh tab with board v12 and exactly three registered base tools.
-- Use the same agent conversation for staging and committing.
-- Keep the live registry, board version, semantic diff, digest, and receipt readable at 1080p.
-- Run the full journey successfully twice without intervention before the final take.
-- Record clean narration only: no copyrighted music and no unrelated brands or notifications.
+- Use the same Agent conversation for staging, committing, and undo.
+- Keep the live registry, board version, semantic diff, digest prefix, and receipt readable at 1080p.
+- Run this exact interactive-Agent journey successfully twice before the final take.
+- Record clean English narration only: no copyrighted music, unrelated brands, private tabs, or notifications.
 
-## 0:00–0:12 — Hook
+## 0:00–0:13 — Hook
 
-**On screen:** Launch board and live WebMCP registry side by side.
-
-**Narration:**
-
-> An agent can propose five changes. But should I approve five low-context calls, or give it broad write access? Staged offers a third option: review the outcome, then create only the capability needed to land it.
-
-## 0:12–0:27 — Prove absence
-
-**On screen:** Zoom the registry. Show the three base tools; point out that `commit_plan` is absent.
+**On screen:** Public URL, launch board, and live native WebMCP registry side by side.
 
 **Narration:**
 
-> Staged separates proposal from authority. Before review, commit is not denied—it does not exist in the page's WebMCP tool registry. None of these initial tools can change canonical state.
+> When agents make several related changes, per-call approvals hide the combined outcome, while broad write access arrives too early. Staged lets an agent draft first, lets me review one diff, and grants only the reviewed commit.
 
-## 0:27–0:57 — Real agent stages work
+## 0:13–0:27 — Prove absence
 
-**On screen:** In ChatGPT's in-app browser, send:
-
-> Prepare the Friday launch board from the overdue work. Respect policy locks, show me the complete proposed change before anything lands, and wait for my decision.
-
-Show the real agent discover and call native tools. Return to the page: ghost changes are visible, `BILL-8` is policy-blocked, and the board remains v12.
+**On screen:** Zoom the registry. Show only `get_launch_board`, `stage_plan`, and `inspect_staged_plan`; point out that `commit_plan` is absent.
 
 **Narration:**
 
-> The agent reads the same live board I see and stages one bounded plan. Billing is protected before approval, and the proposed work appears as ghost state. Production is still v12.
+> On this fresh page, the native WebMCP registry exposes only read, stage, and inspect tools. commit_plan is absent, so none of Staged's initial tools can change the canonical board.
 
-## 0:57–1:19 — Human edits the combined outcome
+## 0:27–0:55 — Real Agent stages work
 
-**On screen:** Change one proposed assignee and remove one operation. Briefly show `commit_plan` is still absent.
+**On screen:** In ChatGPT's in-app browser or an equivalent native site-tools client, send:
 
-**Narration:**
+> Read the current launch board. Stage this plan for human review only: assign OPS-31 to Maya Chen; move OPS-31 to `this-week`; archive OPS-27 with value `duplicate`; and attempt to move BILL-8 to `this-week`. Give a brief reason for each operation. Do not commit anything. Report accepted and blocked operations, then wait for my decision.
 
-> I review the combined semantic effect, not a stream of scattered calls. I can correct the assignee and remove an operation without giving the agent execution authority.
-
-## 1:19–1:43 — Approval compiles a capability
-
-**On screen:** Click **Compile exact capability**. Show the 64-character digest, 60-second TTL, `toolchange` increment, and `commit_plan` appearing. Expand or highlight its empty `{}` input schema.
+Show the actual site-tool activity. Return to the page: three accepted changes are visible, `BILL-8` is policy-blocked, and the board remains v12.
 
 **Narration:**
 
-> My click freezes the edited operations with the base version, state hash, and lifetime. Only now does the page register `commit_plan`. It accepts no plan ID, token, or replacement operations. The reviewed decision is captured by the tool itself.
+> From the same live page, the agent reads board version twelve and stages four requested operations. The site accepts three, blocks BILL-8 under its finance policy, and renders a reviewable preview. The board is still version twelve.
 
-## 1:43–2:04 — Same agent commits once
+## 0:55–1:13 — Human edits the combined outcome
 
-**On screen:** Tell the same agent:
-
-> Refresh the page's available tools. If `commit_plan` is available, execute it with empty input and report the receipt.
-
-Show native invocation, board v13, receipt, `commit_plan` disappearing, and `undo_commit` appearing.
+**On screen:** Change OPS-31's assignee from Maya Chen to Jon Bell and remove the OPS-27 archive operation. Show `2 selected` and briefly show that `commit_plan` is still absent.
 
 **Narration:**
 
-> The same agent discovers one new capability and invokes it with empty input. The exact reviewed transition lands once, returns a digest-linked receipt, and consumes its own authority. Commit disappears; a state-bound recovery tool appears.
+> Now I make the judgment. I change OPS-31's assignee from Maya to Jon and remove the archive operation. The proposal changes, canonical state does not, and commit_plan is still absent.
 
-## 2:04–2:24 — Guarded recovery
+## 1:13–1:41 — Approval compiles a capability
 
-**On screen:** Invoke `undo_commit`. Show the version/hash check, restored board, and removal of undo.
-
-**Narration:**
-
-> Recovery is conditional, too. Undo proceeds only while the current state still matches the receipt, so it will not overwrite newer work. Here the check passes, the demo state is restored, and the recovery capability disappears.
-
-## 2:24–2:38 — Close
-
-**On screen:** Replay or highlight the lifecycle: `absent → human-approved → available → consumed → guarded undo`.
+**On screen:** Click **Compile capability · 2 operations**. Show the 60-second countdown, the UI's digest prefix, `commit_plan` appearing in the live registry, and the card stating that its input is `{}`. The Agent's later result will show the corresponding full digest.
 
 **Narration:**
 
-> Most approval systems gate an action. Staged gates the existence of the action: one reviewed outcome, one temporary WebMCP capability, one inspectable transition. Approval, compiled into capability.
+> Only when I click Compile exact capability does the page freeze those two operations with the base version, state hash, and sixty-second lifetime. It hashes that snapshot and registers an empty-input commit_plan. The agent cannot replace the reviewed payload at call time.
 
-## Capture checklist
+## 1:41–2:08 — Same Agent commits once
 
-- The native agent call is visible before 0:57.
+**On screen:** In the same conversation send:
+
+> Refresh the page's available WebMCP tools. If `commit_plan` is present, invoke it once with `{}`. Report the approval digest, receipt ID, before and after versions, and operation count. Do not invoke undo.
+
+Show the native invocation, board v13, receipt, `commit_plan` disappearing, and `undo_commit` appearing.
+
+**Narration:**
+
+> The same agent refreshes its tools and calls commit_plan with an empty object. The board advances once to version thirteen. The approval digest is linked to the receipt, commit authority is consumed, commit_plan disappears, and undo_commit appears.
+
+## 2:08–2:31 — Guarded recovery
+
+**On screen:** In the same conversation send:
+
+> Refresh the page's available WebMCP tools. If `undo_commit` is present, invoke it once with `{}`. Report whether the receipt guard passed and the resulting board version.
+
+Show restored task state at board v14 and the registry returning to the three base tools.
+
+**Narration:**
+
+> Undo is limited to the reversible operations in this demo. Before restoring them, it checks that the current version and state hash still match the receipt. Here the check passes, task state is restored at version fourteen, and undo_commit disappears.
+
+## 2:31–2:46 — Close
+
+**On screen:** Highlight the lifecycle: `absent → human-approved → temporarily available → consumed → guarded recovery`.
+
+**Narration:**
+
+> Staged is a reference control pattern: absent, human-approved, temporarily available, consumed, then guarded recovery. Approval changes not just whether a call runs, but which exact capability exists.
+
+## Shot and evidence checklist
+
+- The public URL and **Native WebMCP connected** badge are visible.
+- A real native Agent tool call is visible before 0:55.
 - `commit_plan` is visibly absent before approval.
-- The human visibly changes the agent's proposed plan.
-- `commit_plan` visibly appears through the registry lifecycle, with `{}` input.
-- The board changes exactly once and the receipt is readable.
-- `commit_plan` visibly disappears; `undo_commit` appears and then disappears.
-- Final uploaded video is public on YouTube, under three minutes, has clear English audio, and plays correctly while signed out.
+- The human visibly changes the Agent's proposal from three selected operations to two.
+- `commit_plan` visibly appears with `{}` input and a 60-second lifetime.
+- The UI's digest prefix visibly matches the full digest returned to the Agent.
+- The board changes once from v12 to v13 and the receipt is readable.
+- `commit_plan` disappears; `undo_commit` appears, passes its guard, then disappears at v14.
+- Cuts may remove Agent waiting time, but the prompt, native call, result, and page transition remain continuous evidence.
+- Final video is 1080p, public on YouTube, under 3:00, has clear English audio, and plays while signed out.
+- Do not claim “production,” “first ever,” “cryptographically authorized,” durable network exactly-once, or universal rollback.

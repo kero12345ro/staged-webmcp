@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Staged — Git-style control for agent actions",
+  title: "Staged — Approval, compiled into capability",
   description:
-    "Let agents stage a plan, let humans edit the diff, then expose a one-time WebMCP commit capability with receipts and safe undo.",
+    "Turn one human-edited diff into a 60-second, empty-input WebMCP commit tool bound to the exact reviewed snapshot.",
 };
 
 export default function RootLayout({

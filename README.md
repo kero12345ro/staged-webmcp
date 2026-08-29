@@ -57,7 +57,7 @@ The important part is what the agent **cannot** submit to `commit_plan`: no plan
 
 ## Why WebMCP is essential
 
-Staged is not a backend MCP server placed behind a web UI. Its core behavior depends on the browser-native relationship between a live page, its signed-in state, the human, and the agent:
+Staged is not a backend MCP server placed behind a web UI. Its core behavior depends on the browser-native relationship between the live page state, the human, and the agent:
 
 - The agent sees the same current board and policy state the human sees.
 - Tool availability changes with page state.
@@ -197,10 +197,11 @@ The Playwright suite drives Chrome's real `document.modelContext` API. It verifi
 - only the three base tools exist initially;
 - native `executeTool()` stages a plan while policy-blocked work stays out;
 - a human edit replaces the agent's proposed value before digest compilation;
-- the inspector and UI expose the same 64-character approval digest;
+- the native tool result exposes the full 64-character digest while the UI shows its matching 16-character prefix;
 - `commit_plan` appears only after the human action and accepts `{}`;
 - two concurrent native calls return the same receipt and increment state once;
 - commit consumes itself and exposes receipt-bound `undo_commit`;
+- staging a non-canonical follow-up does not discard a still-valid undo receipt;
 - native undo removes its own capability;
 - revoke and exact 60-second expiry both remove `commit_plan` without touching canonical state.
 

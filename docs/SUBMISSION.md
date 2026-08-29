@@ -6,7 +6,7 @@ This file is the copy-ready English submission for the OpenAI WebMCP Challenge. 
 
 - **Title:** Staged
 - **Tagline:** Approval, compiled into capability.
-- **One-line summary:** Staged turns a human-reviewed diff into a capability the agent never had—and destroys that capability after one exact state transition.
+- **One-line summary:** Staged turns one human-edited diff into a 60-second, empty-input WebMCP commit tool bound to that exact reviewed snapshot.
 - **Live URL:** https://staged-webmcp.yihan.chatgpt.site
 - **Public repository:** https://github.com/kero12345ro/staged-webmcp
 - **Public YouTube demo:** `PENDING — record after two successful real-agent rehearsals`
@@ -18,7 +18,7 @@ Staged uses the live WebMCP tool registry as an authority surface, not merely as
 
 ## How it creates a better user experience
 
-Per-call confirmations fragment a multi-step outcome into low-context interruptions. Staged instead lets the agent prepare the work while canonical data remains unchanged, then gives the person one semantic diff to understand and edit. In the demo, a protected billing operation is blocked before review, proposed changes appear as ghost state, and the reviewer can remove an operation or change its assignee. Approval grants only the capability needed to land that edited result. The commit returns a visible receipt linking the approval digest, before/after versions, and state hashes; a guarded `undo_commit` appears only while compensation will not overwrite newer work.
+Per-call confirmations fragment a multi-step outcome into low-context interruptions. Staged instead lets the agent prepare the work while canonical data remains unchanged, then gives the person one semantic diff to understand and edit. In the demo, a protected billing operation is blocked before review, proposed changes appear as ghost state, and the reviewer can remove an operation or change its assignee. Approval grants only the capability needed to land that edited result. The commit returns a visible receipt linking the approval digest, before/after versions, and state hashes. A guarded `undo_commit` then rechecks the current version and state hash before compensation and refuses if newer state no longer matches.
 
 ## What people and agents can now do together
 
@@ -65,7 +65,7 @@ npx playwright install chromium
 npm run test:webmcp
 ```
 
-The native suite contains five passing tests covering the full lifecycle, human edits, digest binding, concurrent duplicate calls, revocation, exact TTL expiry, and guarded undo.
+The Playwright suite contains three native WebMCP lifecycle tests and two capability-compiler tests. Together they cover human edits, digest binding, concurrent duplicate calls, revocation, exact TTL expiry, guarded undo, and preservation of a still-valid undo receipt during non-canonical follow-up staging.
 
 ## Honest scope
 

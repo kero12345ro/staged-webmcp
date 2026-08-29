@@ -176,7 +176,7 @@ const COLUMNS: { id: ColumnId; label: string }[] = [
 ];
 
 const DEMO_INPUT = {
-  summary: "Clean up Friday launch work without directly changing production.",
+  summary: "Clean up Friday launch work without changing the canonical board.",
   operations: [
     {
       type: "assign",
@@ -488,12 +488,11 @@ export default function StagedApp() {
       }
 
       setApprovalState(null);
-      setReceiptState(null);
       setPlanState(normalized.plan);
       setActivity(
         "Agent staged " +
           normalized.plan.operations.length +
-          " changes. Production is unchanged.",
+          " changes. The canonical board is unchanged.",
       );
 
       return {
@@ -507,7 +506,7 @@ export default function StagedApp() {
           "Plan is staged only. Ask the human to review the visible diff; you cannot approve it.",
       };
     },
-    [setApprovalState, setPlanState, setReceiptState],
+    [setApprovalState, setPlanState],
   );
 
   const inspectPlan = useCallback(async () => {

@@ -20,20 +20,22 @@ Authoritative source: [Official Rules](https://webmcp.devpost.com/rules). The ru
 
 - [x] Production deployment exists at `https://staged-webmcp.yihan.chatgpt.site`.
 - [x] Owner explicitly authorizes making the app publicly accessible.
-- [ ] Anonymous clean-browser request returns the app rather than HTTP 401.
-- [ ] Complete the native journey twice in ChatGPT's in-app browser or Chrome 149+ with WebMCP enabled.
-- [ ] Verify both ordinary-browser fallback and native registry lifecycle after the final deployment.
-- [ ] If authentication is retained, place working credentials and exact instructions in Devpost.
+- [x] Anonymous clean-browser request returns HTTP 200 and the Staged app rather than an auth wall.
+- [x] Complete the native lifecycle journey twice against the public site in ARM64 Chrome 151 with WebMCP enabled. These direct native API runs verify the browser lifecycle, not model behavior.
+- [x] Verify the ordinary-browser fallback with WebMCP disabled: stage, human edit, compile, commit, and guarded undo all complete through the preview registry.
+- [ ] Repeat both ordinary-browser fallback and native registry checks after the final deployment.
+- [ ] Complete the exact flow twice with a real interactive Agent in ChatGPT's in-app browser or an equivalent native site-tools client before recording.
+- [x] No authentication is required; judges need no credentials.
 
 ## Public repository
 
 - [x] Complete source, assets, run instructions, tests, and MIT `LICENSE` exist locally.
 - [x] Git history contains distinct, timestamped implementation commits.
 - [x] Owner explicitly authorizes creation of the public repository.
-- [ ] Public GitHub/GitLab/Bitbucket URL opens while signed out.
-- [ ] Repository About section visibly detects the MIT license.
+- [x] Public GitHub URL opens while signed out and the anonymous GitHub API reports `visibility: public`.
+- [x] Repository About/API detects the MIT license.
 - [ ] README hero, screenshots, local setup, limitations, and native verification render correctly.
-- [ ] Create a final immutable tag or release and record the submitted commit SHA.
+- [ ] Record the exact submitted commit SHA; optionally create an annotated release tag.
 
 ## Release candidate verification
 
@@ -41,18 +43,18 @@ Authoritative source: [Official Rules](https://webmcp.devpost.com/rules). The ru
 - [x] Fresh-copy `npm ci` succeeds with zero reported vulnerabilities.
 - [x] Fresh-copy lint and TypeScript checks pass.
 - [x] Fresh-copy Vinext/Vite production build passes.
-- [x] Five native WebMCP Playwright tests pass on ARM64 with Chrome 151.
+- [x] Three native WebMCP lifecycle tests and two capability-compiler tests pass on ARM64 with Chrome 151.
 - [ ] Redeploy the final verified commit and repeat the signed-out live smoke test.
 
 ## Video
 
-- [ ] Rehearse the exact real-agent flow twice before recording.
+- [ ] Rehearse the exact real-Agent flow twice before recording. The two automated native Chrome journeys do not satisfy this model-behavior rehearsal.
 - [ ] Record a clear functioning demo with English narration.
 - [ ] Show a real native agent call within the first minute.
 - [ ] Show `commit_plan` absent, dynamically added, invoked with `{}`, and removed.
 - [ ] Show the human changing the proposed plan before approval.
 - [ ] Show receipt-bound undo and its conflict-safe explanation.
-- [ ] Final runtime is under 3:00; target 2:38.
+- [ ] Final runtime is under 3:00; target 2:46.
 - [ ] Upload publicly to YouTube and verify playback while signed out.
 - [ ] Confirm audio, text legibility, and 1080p processing before copying the URL.
 
@@ -73,7 +75,7 @@ Authoritative source: [Official Rules](https://webmcp.devpost.com/rules). The ru
 
 - **Submitted commit SHA:** `PENDING`
 - **Live deployment/version:** `PENDING`
-- **Public repository URL:** `PENDING`
+- **Public repository URL:** `https://github.com/kero12345ro/staged-webmcp`
 - **YouTube URL:** `PENDING`
 - **Devpost URL:** `PENDING`
 - **Submission timestamp:** `PENDING`
