@@ -2,7 +2,7 @@
 
 > **Approval, compiled into capability.**
 
-Staged is a WebMCP control pattern for consequential, multi-step agent work. The agent may inspect live application state and draft a plan, but it cannot mutate canonical state. A person reviews and edits one semantic diff. Only then does the page compile that exact decision into a 60-second, one-shot `commit_plan` tool.
+Staged is a WebMCP control pattern for consequential, multi-step agent work. The agent may inspect live application state and draft a plan, but none of Staged's initial WebMCP tools can mutate canonical state. A person reviews and edits one semantic diff. Only then does the page compile that exact decision into a 60-second, single-use `commit_plan` tool.
 
 A successful commit consumes the capability, returns a before/after receipt, and conditionally exposes `undo_commit` while compensation remains conflict-safe.
 
@@ -35,7 +35,7 @@ The included launch-operations workspace makes every authority transition visibl
 5. The page computes a SHA-256 approval digest over that exact snapshot and 60-second lifetime.
 6. Only now does `document.modelContext.registerTool()` expose `commit_plan`.
 7. `commit_plan` accepts `{}`: the agent cannot replace the plan, choose another ID, or broaden the payload.
-8. Invocation consumes authority before asynchronous execution completes. Concurrent retries share one result.
+8. The first invocation consumes authority before asynchronous execution completes. Concurrent duplicate calls coalesce onto one state transition and receipt.
 9. The commit returns a digest-linked receipt; `commit_plan` disappears and guarded `undo_commit` appears.
 10. Undo verifies the receipt's version and state hash before compensation, then removes itself.
 
@@ -63,7 +63,7 @@ Staged is not a backend MCP server placed behind a web UI. Its core behavior dep
 - The human edits the plan in normal UI before any consequential capability exists.
 - The browser registry itself proves whether commit authority is available.
 
-Without WebMCP, the product would need a separate remote tool server, duplicated authentication and state synchronization, and an out-of-band approval channel.
+Without WebMCP, an equivalent design would need to synchronize a separate remote tool and approval channel with the live page state.
 
 ## Safety invariants demonstrated
 
@@ -74,7 +74,7 @@ Without WebMCP, the product would need a separate remote tool server, duplicated
 - **Authority is one-shot.** Invocation consumes the active registration before asynchronous work completes.
 - **Authority expires or revokes.** `AbortSignal` removes the tool on use, human revoke, or TTL.
 - **Commit is stale-safe.** Version or base-hash mismatch consumes the capability without writing.
-- **Retry is idempotent.** Concurrent calls share the same in-flight result and receipt.
+- **Concurrent duplicates coalesce.** In this tab-local demo, simultaneous calls share the same in-flight transition and receipt.
 - **Undo is conflict-safe.** It refuses to overwrite state that no longer matches the receipt.
 - **Receipts are inspectable.** Approval digest, versions, and before/after hashes form a visible chain.
 
@@ -156,12 +156,12 @@ A domain adapter supplies its own validation, preview, transaction, receipt, and
 
 Requirements:
 
-- Node.js 22.13 or newer
-- npm, pnpm, or Bun
+- Node.js 22.13 or newer (tested on ARM64 with Node 24.19)
+- npm 11 or newer
 - Chrome 149+ with WebMCP testing enabled for native tool inspection
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
