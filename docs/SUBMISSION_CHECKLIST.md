@@ -14,12 +14,12 @@ Authoritative source: [Official Rules](https://webmcp.devpost.com/rules). The ru
 - [ ] Entrant is eligible under the country, age, employment, and conflict-of-interest rules.
 - [ ] All project work is original or uses dependencies/assets under compatible licenses.
 - [ ] No unlicensed music, third-party footage, or unnecessary third-party trademarks appear in the video.
-- [ ] Commit history clearly timestamps this new project inside the hackathon submission period.
+- [x] Commit history clearly timestamps this new project inside the hackathon submission period.
 
 ## Live app
 
 - [x] Production deployment exists at `https://staged-webmcp.yihan.chatgpt.site`.
-- [ ] Owner explicitly authorizes making the app publicly accessible.
+- [x] Owner explicitly authorizes making the app publicly accessible.
 - [ ] Anonymous clean-browser request returns the app rather than HTTP 401.
 - [ ] Complete the native journey twice in ChatGPT's in-app browser or Chrome 149+ with WebMCP enabled.
 - [ ] Verify both ordinary-browser fallback and native registry lifecycle after the final deployment.
@@ -29,7 +29,7 @@ Authoritative source: [Official Rules](https://webmcp.devpost.com/rules). The ru
 
 - [x] Complete source, assets, run instructions, tests, and MIT `LICENSE` exist locally.
 - [x] Git history contains distinct, timestamped implementation commits.
-- [ ] Owner explicitly authorizes creation of the public repository.
+- [x] Owner explicitly authorizes creation of the public repository.
 - [ ] Public GitHub/GitLab/Bitbucket URL opens while signed out.
 - [ ] Repository About section visibly detects the MIT license.
 - [ ] README hero, screenshots, local setup, limitations, and native verification render correctly.

@@ -2,6 +2,8 @@
 
 > **Approval, compiled into capability.**
 
+[Live demo](https://staged-webmcp.yihan.chatgpt.site) · [Submission narrative](docs/SUBMISSION.md) · [Demo script](docs/DEMO_SCRIPT.md)
+
 Staged is a WebMCP control pattern for consequential, multi-step agent work. The agent may inspect live application state and draft a plan, but none of Staged's initial WebMCP tools can mutate canonical state. A person reviews and edits one semantic diff. Only then does the page compile that exact decision into a 60-second, single-use `commit_plan` tool.
 
 A successful commit consumes the capability, returns a before/after receipt, and conditionally exposes `undo_commit` while compensation remains conflict-safe.

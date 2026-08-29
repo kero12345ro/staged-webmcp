@@ -7,8 +7,8 @@ This file is the copy-ready English submission for the OpenAI WebMCP Challenge. 
 - **Title:** Staged
 - **Tagline:** Approval, compiled into capability.
 - **One-line summary:** Staged turns a human-reviewed diff into a capability the agent never had—and destroys that capability after one exact state transition.
-- **Live URL:** `PENDING — staged-webmcp.yihan.chatgpt.site is currently owner-only`
-- **Public repository:** `PENDING — public repository requires owner authorization`
+- **Live URL:** https://staged-webmcp.yihan.chatgpt.site
+- **Public repository:** https://github.com/kero12345ro/staged-webmcp
 - **Public YouTube demo:** `PENDING — record after two successful real-agent rehearsals`
 - **License:** MIT
 
